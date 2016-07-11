@@ -41,6 +41,7 @@ import com.gs.collections.impl.utility.ListIterate;
 
 import kafka.client.ClientUtils$;
 import kafka.cluster.Broker;
+import kafka.cluster.BrokerEndPoint;
 import kafka.common.ErrorMapping;
 import kafka.javaapi.TopicMetadata;
 import kafka.javaapi.TopicMetadataResponse;
@@ -57,14 +58,15 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 
 	private final static Log log = LogFactory.getLog(DefaultConnectionFactory.class);
 
-	public static final Predicate<TopicMetadata> errorlessTopicMetadataPredicate = new ErrorlessTopicMetadataPredicate();
+	public static final Predicate<TopicMetadata> errorlessTopicMetadataPredicate =
+			new ErrorlessTopicMetadataPredicate();
 
 	private final GetBrokersByPartitionFunction getBrokersByPartitionFunction = new GetBrokersByPartitionFunction();
 
 	private final Configuration configuration;
 
-	private final AtomicReference<MetadataCache> metadataCacheHolder = new AtomicReference<MetadataCache>(
-			new MetadataCache(Collections.<TopicMetadata>emptySet()));
+	private final AtomicReference<MetadataCache> metadataCacheHolder =
+			new AtomicReference<MetadataCache>(new MetadataCache(Collections.<TopicMetadata>emptySet()));
 
 	private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
@@ -107,8 +109,7 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 		try {
 			this.lock.readLock().lock();
 			leader = getMetadataCache().getLeader(partition);
-		}
-		finally {
+		} finally {
 			this.lock.readLock().unlock();
 		}
 		if (leader == null) {
@@ -120,8 +121,7 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 					refreshMetadata(Collections.singleton(partition.getTopic()));
 					leader = getMetadataCache().getLeader(partition);
 				}
-			}
-			finally {
+			} finally {
 				this.lock.writeLock().unlock();
 			}
 		}
@@ -140,8 +140,7 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 		try {
 			this.lock.readLock().lock();
 			connection = this.kafkaBrokersCache.get(brokerAddress);
-		}
-		finally {
+		} finally {
 			this.lock.readLock().unlock();
 		}
 		if (connection == null) {
@@ -157,8 +156,7 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 							DefaultConnectionFactory.this.configuration.getMaxWait());
 					kafkaBrokersCache.put(brokerAddress, connection);
 				}
-			}
-			finally {
+			} finally {
 				this.lock.writeLock().unlock();
 			}
 		}
@@ -172,21 +170,21 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 	public void refreshMetadata(Collection<String> topics) {
 		try {
 			this.lock.writeLock().lock();
-			String brokerAddressesAsString = ListIterate
-					.collect(this.configuration.getBrokerAddresses(), Functions.getToString()).makeString(",");
-			Seq<Broker> brokers = null;
+			String brokerAddressesAsString =
+					ListIterate.collect(this.configuration.getBrokerAddresses(), Functions.getToString())
+							.makeString(",");
+			Seq<BrokerEndPoint> brokers = null;
 			try {
 				brokers = ClientUtils$.MODULE$.parseBrokerList(brokerAddressesAsString);
-			}
-			catch (Exception e) {
-				throw new IllegalStateException("Can not parse Kafka Brokers for: [" + brokerAddressesAsString + "]", e);
+			} catch (Exception e) {
+				throw new IllegalStateException("Can not parse Kafka Brokers for: [" + brokerAddressesAsString + "]",
+						e);
 			}
 			TopicMetadataResponse topicMetadataResponse = new TopicMetadataResponse(ClientUtils$.MODULE$
-					.fetchTopicMetadata(JavaConversions.asScalaSet(new HashSet<>(topics)),
-							brokers,
+					.fetchTopicMetadata(JavaConversions.asScalaSet(new HashSet<>(topics)), brokers,
 							this.configuration.getClientId(), this.configuration.getFetchMetadataTimeout(), 0));
-			PartitionIterable<TopicMetadata> selectWithoutErrors = Iterate
-					.partition(topicMetadataResponse.topicsMetadata(), errorlessTopicMetadataPredicate);
+			PartitionIterable<TopicMetadata> selectWithoutErrors =
+					Iterate.partition(topicMetadataResponse.topicsMetadata(), errorlessTopicMetadataPredicate);
 			this.metadataCacheHolder.set(this.metadataCacheHolder.get().merge(selectWithoutErrors.getSelected()));
 			if (log.isInfoEnabled()) {
 				for (TopicMetadata topicMetadata : selectWithoutErrors.getRejected()) {
@@ -194,8 +192,7 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 							ErrorMapping.exceptionFor(topicMetadata.errorCode()));
 				}
 			}
-		}
-		finally {
+		} finally {
 			this.lock.writeLock().unlock();
 		}
 	}
@@ -208,8 +205,7 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 			if (connection != null) {
 				connection.close();
 			}
-		}
-		finally {
+		} finally {
 			this.lock.writeLock().unlock();
 		}
 	}
@@ -224,8 +220,7 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 		try {
 			this.lock.readLock().lock();
 			returnedPartitions = getMetadataCache().getPartitions(topic);
-		}
-		finally {
+		} finally {
 			this.lock.readLock().unlock();
 		}
 		// if we got here, it means that the data was not available, we should try a refresh. The lock is reentrant
@@ -240,8 +235,7 @@ public class DefaultConnectionFactory implements InitializingBean, ConnectionFac
 					// if data is not available after refreshing, it means that the topic was not found
 					returnedPartitions = getMetadataCache().getPartitions(topic);
 				}
-			}
-			finally {
+			} finally {
 				lock.writeLock().unlock();
 			}
 		}

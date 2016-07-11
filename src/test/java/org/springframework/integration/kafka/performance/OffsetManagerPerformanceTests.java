@@ -46,6 +46,8 @@ import com.gs.collections.api.multimap.MutableMultimap;
 import com.gs.collections.api.tuple.Pair;
 import com.gs.collections.impl.factory.Multimaps;
 import com.gs.collections.impl.tuple.Tuples;
+
+import kafka.utils.ZkUtils;
 import scala.collection.JavaConversions;
 import scala.collection.Map;
 import scala.collection.immutable.List$;
@@ -120,7 +122,7 @@ public class OffsetManagerPerformanceTests {
 	public void createTopic(ZkClient zkClient, String topicName, int partitionCount, int brokers, int replication) {
 		MutableMultimap<Integer, Integer> partitionDistribution =
 				createPartitionDistribution(partitionCount, brokers, replication);
-		ensureTopicCreated(zkClient, topicName, partitionCount, new Properties(),
+		ensureTopicCreated(new ZkUtils(zkClient, null, false), topicName, partitionCount, new Properties(),
 				toKafkaPartitionMap(partitionDistribution));
 	}
 

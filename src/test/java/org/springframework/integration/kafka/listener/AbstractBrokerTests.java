@@ -26,16 +26,8 @@ import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import com.gs.collections.api.RichIterable;
-import com.gs.collections.api.block.function.Function2;
-import com.gs.collections.api.multimap.Multimap;
-import com.gs.collections.api.multimap.MutableMultimap;
-import com.gs.collections.api.tuple.Pair;
-import com.gs.collections.impl.factory.Multimaps;
-import com.gs.collections.impl.tuple.Tuples;
-import kafka.admin.AdminUtils;
-import kafka.utils.TestUtils;
 import org.I0Itec.zkclient.ZkClient;
+import org.I0Itec.zkclient.ZkConnection;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.kafka.clients.producer.Callback;
@@ -45,12 +37,6 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.junit.After;
 import org.junit.Assert;
-import scala.collection.JavaConversions;
-import scala.collection.Map;
-import scala.collection.immutable.List$;
-import scala.collection.immutable.Map$;
-import scala.collection.immutable.Seq;
-
 import org.springframework.integration.kafka.core.BrokerAddressListConfiguration;
 import org.springframework.integration.kafka.core.Configuration;
 import org.springframework.integration.kafka.core.ConnectionFactory;
@@ -58,6 +44,23 @@ import org.springframework.integration.kafka.core.DefaultConnectionFactory;
 import org.springframework.integration.kafka.rule.KafkaRule;
 import org.springframework.integration.kafka.serializer.common.StringEncoder;
 import org.springframework.integration.kafka.util.EncoderAdaptingSerializer;
+
+import com.gs.collections.api.RichIterable;
+import com.gs.collections.api.block.function.Function2;
+import com.gs.collections.api.multimap.Multimap;
+import com.gs.collections.api.multimap.MutableMultimap;
+import com.gs.collections.api.tuple.Pair;
+import com.gs.collections.impl.factory.Multimaps;
+import com.gs.collections.impl.tuple.Tuples;
+
+import kafka.admin.AdminUtils;
+import kafka.utils.TestUtils;
+import kafka.utils.ZkUtils;
+import scala.collection.JavaConversions;
+import scala.collection.Map;
+import scala.collection.immutable.List$;
+import scala.collection.immutable.Map$;
+import scala.collection.immutable.Seq;
 
 /**
  * @author Marius Bogoevici
@@ -78,23 +81,27 @@ public abstract class AbstractBrokerTests {
 	}
 
 	public void createTopic(String topicName, int partitionCount, int brokers, int replication) {
-		createTopic(getKafkaRule().getZkClient(), topicName, partitionCount, brokers, replication);
+		ZkUtils zkUtil = new ZkUtils(getKafkaRule().getZkClient(),
+				new ZkConnection(getKafkaRule().getZookeeperConnectionString()), false);
+		createTopic(zkUtil, topicName, partitionCount, brokers, replication);
 	}
 
 	@SuppressWarnings("unchecked")
-	public void createTopic(ZkClient zkClient, String topicName, int partitionCount, int brokers, int replication) {
+	public void createTopic(ZkUtils zkUtil, String topicName, int partitionCount, int brokers, int replication) {
 		MutableMultimap<Integer, Integer> partitionDistribution =
 				createPartitionDistribution(partitionCount, brokers, replication);
-		ensureTopicCreated(zkClient, topicName, partitionCount, new Properties(),
+		ensureTopicCreated(zkUtil, topicName, partitionCount, new Properties(),
 				toKafkaPartitionMap(partitionDistribution));
 	}
 
 	public void deleteTopic(String topicName) {
-		AdminUtils.deleteTopic(getKafkaRule().getZkClient(), topicName);
+		ZkUtils zkUtil = new ZkUtils(getKafkaRule().getZkClient(),
+				new ZkConnection(getKafkaRule().getZookeeperConnectionString()), false);
+		AdminUtils.deleteTopic(zkUtil, topicName);
 		if (getKafkaRule().isEmbedded()) {
-			TestUtils.waitUntilMetadataIsPropagated(asScalaBuffer(getKafkaRule().getKafkaServers()), topicName, 0, 5000L);
-		}
-		else {
+			TestUtils.waitUntilMetadataIsPropagated(asScalaBuffer(getKafkaRule().getKafkaServers()), topicName, 0,
+					5000L);
+		} else {
 			sleep(1000);
 		}
 	}
@@ -110,19 +117,20 @@ public abstract class AbstractBrokerTests {
 		return partitionDistribution;
 	}
 
-
 	public Configuration getKafkaConfiguration() {
-		BrokerAddressListConfiguration configuration = new BrokerAddressListConfiguration(getKafkaRule().getBrokerAddresses());
+		BrokerAddressListConfiguration configuration =
+				new BrokerAddressListConfiguration(getKafkaRule().getBrokerAddresses());
 		configuration.setSocketTimeout(500);
 		return configuration;
 	}
 
-	public static Collection<ProducerRecord<String, String>> createMessages(int count, String topic, int partitionCount) {
+	public static Collection<ProducerRecord<String, String>> createMessages(int count, String topic,
+			int partitionCount) {
 		return createMessagesInRange(0, count - 1, topic, partitionCount);
 	}
 
-	public static Collection<ProducerRecord<String, String>> createMessagesInRange(int start, int end,
-			String topic, int partitionCount) {
+	public static Collection<ProducerRecord<String, String>> createMessagesInRange(int start, int end, String topic,
+			int partitionCount) {
 		List<ProducerRecord<String, String>> messages = new ArrayList<>();
 		for (int i = start; i <= end; i++) {
 			messages.add(new ProducerRecord<>(topic, i % partitionCount, "Key " + i, "Message " + i));
@@ -134,9 +142,9 @@ public abstract class AbstractBrokerTests {
 		Properties producerConfig = new Properties();
 		producerConfig.setProperty("bootstrap.servers", getKafkaRule().getBrokersAsString());
 		producerConfig.setProperty("compression.type", compression);
-		KafkaProducer<String, String> producer = new KafkaProducer<>(producerConfig,
-				new EncoderAdaptingSerializer<>(new StringEncoder()),
-				new EncoderAdaptingSerializer<>(new StringEncoder()));
+		KafkaProducer<String, String> producer =
+				new KafkaProducer<>(producerConfig, new EncoderAdaptingSerializer<>(new StringEncoder()),
+						new EncoderAdaptingSerializer<>(new StringEncoder()));
 		return new Sender<>(producer);
 	}
 
@@ -144,9 +152,9 @@ public abstract class AbstractBrokerTests {
 		Properties producerConfig = new Properties();
 		producerConfig.setProperty("bootstrap.servers", getKafkaRule().getBrokerAddresses()[brokerIndex].toString());
 		producerConfig.setProperty("compression.type", compression);
-		KafkaProducer<String, String> producer = new KafkaProducer<>(producerConfig,
-				new EncoderAdaptingSerializer<>(new StringEncoder()),
-				new EncoderAdaptingSerializer<>(new StringEncoder()));
+		KafkaProducer<String, String> producer =
+				new KafkaProducer<>(producerConfig, new EncoderAdaptingSerializer<>(new StringEncoder()),
+						new EncoderAdaptingSerializer<>(new StringEncoder()));
 		return new Sender<>(producer);
 	}
 
@@ -156,10 +164,10 @@ public abstract class AbstractBrokerTests {
 		return connectionFactory;
 	}
 
-	@SuppressWarnings({"rawtypes", "serial", "deprecation"})
+	@SuppressWarnings({ "rawtypes", "serial", "deprecation" })
 	private Map toKafkaPartitionMap(Multimap<Integer, Integer> partitions) {
-		java.util.Map<Object, Seq<Object>> m = partitions.toMap()
-				.collect(new Function2<Integer, RichIterable<Integer>, Pair<Object, Seq<Object>>>() {
+		java.util.Map<Object, Seq<Object>> m =
+				partitions.toMap().collect(new Function2<Integer, RichIterable<Integer>, Pair<Object, Seq<Object>>>() {
 
 					@Override
 					public Pair<Object, Seq<Object>> value(Integer argument1, RichIterable<Integer> argument2) {
@@ -174,38 +182,36 @@ public abstract class AbstractBrokerTests {
 	private static void sleep(int time) {
 		try {
 			Thread.sleep(time);
-		}
-		catch (InterruptedException e) {
+		} catch (InterruptedException e) {
 			log.error(e);
 		}
 	}
 
-	public class Sender<K,V> {
+	public class Sender<K, V> {
 
-		private Producer<K,V> producer;
+		private Producer<K, V> producer;
 
 		public Sender(Producer<K, V> producer) {
 			this.producer = producer;
 		}
 
-		public void send(Collection<ProducerRecord<K,V>> records) {
+		public void send(Collection<ProducerRecord<K, V>> records) {
 			final CountDownLatch sendLatch = new CountDownLatch(records.size());
 			final ArrayList<Exception> exceptions = new ArrayList<>();
 			for (ProducerRecord<K, V> record : records) {
-					producer.send(record, new Callback() {
-						@Override
-						public void onCompletion(RecordMetadata metadata, Exception exception) {
-							sendLatch.countDown();
-							if (exception != null) {
-								exceptions.add(exception);
-							}
+				producer.send(record, new Callback() {
+					@Override
+					public void onCompletion(RecordMetadata metadata, Exception exception) {
+						sendLatch.countDown();
+						if (exception != null) {
+							exceptions.add(exception);
 						}
-					});
+					}
+				});
 			}
 			try {
 				sendLatch.await(SEND_TIMEOUT, TimeUnit.MILLISECONDS);
-			}
-			catch (InterruptedException e) {
+			} catch (InterruptedException e) {
 				throw new RuntimeException(e);
 			}
 			if (exceptions.size() > 0) {

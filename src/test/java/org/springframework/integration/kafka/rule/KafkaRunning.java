@@ -29,8 +29,10 @@ import kafka.utils.ZKStringSerializer$;
 import kafka.utils.ZkUtils;
 
 import org.I0Itec.zkclient.ZkClient;
+import org.I0Itec.zkclient.ZkConnection;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.kafka.common.protocol.SecurityProtocol;
 import org.junit.Assume;
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
@@ -82,17 +84,18 @@ public class KafkaRunning extends TestWatcher implements KafkaRule {
 	@Override
 	@SuppressWarnings("serial")
 	public BrokerAddress[] getBrokerAddresses() {
-		Seq<Broker> allBrokersInCluster = ZkUtils.getAllBrokersInCluster(zkClient);
-		return ListIterate.collect(JavaConversions.asJavaList(allBrokersInCluster),
-				new Function<Broker, BrokerAddress>() {
+		ZkUtils utils = new ZkUtils(zkClient, new ZkConnection(getZookeeperConnectionString()), false);
+		Seq<Broker> allBrokersInCluster = utils.getAllBrokersInCluster();
+		return ListIterate
+				.collect(JavaConversions.asJavaList(allBrokersInCluster), new Function<Broker, BrokerAddress>() {
 
 					@Override
 					public BrokerAddress valueOf(Broker broker) {
-						return new BrokerAddress(broker.host(), broker.port());
+						return new BrokerAddress(broker.getBrokerEndPoint(SecurityProtocol.PLAINTEXT).host(),
+								broker.getBrokerEndPoint(SecurityProtocol.PLAINTEXT).port());
 					}
 
-				})
-				.toArray(new BrokerAddress[allBrokersInCluster.size()]);
+				}).toArray(new BrokerAddress[allBrokersInCluster.size()]);
 	}
 
 	@Override
@@ -117,8 +120,7 @@ public class KafkaRunning extends TestWatcher implements KafkaRule {
 			if (getBrokerAddresses().length == 0) {
 				throw new IllegalStateException("No running Kafka brokers");
 			}
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			logger.warn("Not executing tests because basic connectivity test failed");
 			Assume.assumeNoException(e);
 		}

@@ -16,6 +16,8 @@
 
 package org.springframework.integration.kafka.listener;
 
+import static org.apache.kafka.clients.producer.ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG;
+
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
@@ -25,13 +27,8 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import kafka.admin.AdminUtils$;
-import kafka.api.OffsetRequest;
-import kafka.common.ErrorMapping$;
-import kafka.common.TopicExistsException;
-import kafka.serializer.Decoder;
-import kafka.utils.ZKStringSerializer$;
 import org.I0Itec.zkclient.ZkClient;
+import org.I0Itec.zkclient.ZkConnection;
 import org.I0Itec.zkclient.exception.ZkInterruptedException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -39,7 +36,6 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serializer;
-
 import org.springframework.beans.factory.BeanInitializationException;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.integration.kafka.core.BrokerAddress;
@@ -64,6 +60,16 @@ import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.util.Assert;
 import org.springframework.util.ObjectUtils;
+
+import kafka.admin.AdminUtils$;
+import kafka.admin.RackAwareMode;
+import kafka.api.OffsetRequest;
+import kafka.common.ErrorMapping$;
+import kafka.common.TopicExistsException;
+import kafka.serializer.Decoder;
+import kafka.server.ConfigType;
+import kafka.utils.ZKStringSerializer$;
+import kafka.utils.ZkUtils;
 
 /**
  * Implementation of an {@link OffsetManager} that uses a Kafka topic as the underlying support.
@@ -106,7 +112,7 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 
 	private int retentionTime = 60000;
 
-	private int replicationFactor;
+	private int replicationFactor = 1;
 
 	private int batchBytes = 200;
 
@@ -156,7 +162,6 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 
 	/**
 	 * The size of a segment in the offset topic
-	 *
 	 * @param segmentSize the segment size of an offset topic
 	 */
 	public void setSegmentSize(int segmentSize) {
@@ -204,21 +209,19 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 		((DefaultConnectionFactory) this.connectionFactory).afterPropertiesSet();
 		ZkClient zkClient = new ZkClient(this.zookeeperConnect.getZkConnect(),
 				Integer.parseInt(this.zookeeperConnect.getZkSessionTimeout()),
-				Integer.parseInt(this.zookeeperConnect.getZkConnectionTimeout()),
-				ZKStringSerializer$.MODULE$);
+				Integer.parseInt(this.zookeeperConnect.getZkConnectionTimeout()), ZKStringSerializer$.MODULE$);
+		ZkUtils zkUtils = new ZkUtils(zkClient, new ZkConnection(this.zookeeperConnect.getZkConnect()), false);
 		try {
-			createCompactedTopicIfNotFound(zkClient);
-			validateOffsetTopic(zkClient);
+			createCompactedTopicIfNotFound(zkUtils);
+			validateOffsetTopic(zkUtils);
 			Partition offsetPartition = new Partition(this.topic, 0);
 			BrokerAddress offsetPartitionLeader = this.connectionFactory.getLeader(offsetPartition);
 			readOffsetData(offsetPartition, offsetPartitionLeader);
-			initializeProducer(offsetPartitionLeader);
-		}
-		finally {
+			initializeProducer(offsetPartitionLeader, null);
+		} finally {
 			try {
 				zkClient.close();
-			}
-			catch (ZkInterruptedException e) {
+			} catch (ZkInterruptedException e) {
 				log.error("Error while closing Zookeeper client", e);
 			}
 		}
@@ -251,28 +254,25 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 		this.producer.close();
 		try {
 			((DefaultConnectionFactory) this.connectionFactory).destroy();
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			throw new IOException(e);
 		}
 	}
 
-
-	private void createCompactedTopicIfNotFound(ZkClient zkClient) {
+	private void createCompactedTopicIfNotFound(ZkUtils zkUtils) {
 		Properties topicConfig = new Properties();
 		topicConfig.setProperty(CLEANUP_POLICY, CLEANUP_POLICY_COMPACT);
 		topicConfig.setProperty(DELETE_RETENTION, String.valueOf(this.retentionTime));
 		topicConfig.setProperty(SEGMENT_BYTES, String.valueOf(this.segmentSize));
 		try {
-			this.replicationFactor = 1;
-			AdminUtils$.MODULE$.createTopic(zkClient, this.topic, 1, this.replicationFactor, topicConfig);
-		}
-		catch (TopicExistsException e) {
+			AdminUtils$.MODULE$.createTopic(zkUtils, this.topic, 1, this.replicationFactor, topicConfig,
+					RackAwareMode.Disabled$.MODULE$);
+		} catch (TopicExistsException e) {
 			log.debug("Topic already exists", e);
 		}
 	}
 
-	private void validateOffsetTopic(ZkClient zkClient) throws Exception {
+	private void validateOffsetTopic(ZkUtils zkUtils) throws Exception {
 		//validate that the topic exists, but also prevent working with the topic until it's fully initialized
 		// set a retry template, since operations may fail
 		RetryTemplate retryValidateTopic = new RetryTemplate();
@@ -298,9 +298,9 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 			throw new BeanInitializationException("Offset management topic cannot have more than one partition");
 		}
 
-		Properties properties = AdminUtils$.MODULE$.fetchTopicConfig(zkClient, this.topic);
-		if (!properties.containsKey(CLEANUP_POLICY)
-				|| !CLEANUP_POLICY_COMPACT.equals(properties.getProperty(CLEANUP_POLICY))) {
+		Properties properties = AdminUtils$.MODULE$.fetchEntityConfig(zkUtils, ConfigType.Topic(), this.topic);
+		if (!properties.containsKey(CLEANUP_POLICY) || !CLEANUP_POLICY_COMPACT
+				.equals(properties.getProperty(CLEANUP_POLICY))) {
 			// we set the property to compact, but if using an already created topic,
 			// we must check if it is set up correctly
 			throw new BeanInitializationException("Property 'cleanup.policy' must be set to 'compact' on offset topic");
@@ -360,8 +360,7 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 			if (null != value) {
 				// write data in the cache, overwriting the older values
 				this.data.put(key.getPartition(), value);
-			}
-			else {
+			} else {
 				// a null value means that the data has been deleted, but not compacted yet
 				if (this.data.containsKey(key.getPartition())) {
 					this.data.remove(key.getPartition());
@@ -370,33 +369,34 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 		}
 	}
 
-
-	private void initializeProducer(BrokerAddress leader) throws Exception {
-		ProducerMetadata<Key,Long> producerMetadata = new ProducerMetadata<>(this.topic, Key.class, Long.class,
-				KEY_CODEC, VALUE_CODEC);
+	public void initializeProducer(BrokerAddress leader, Properties customProperties) throws Exception {
+		ProducerMetadata<Key, Long> producerMetadata =
+				new ProducerMetadata<>(this.topic, Key.class, Long.class, KEY_CODEC, VALUE_CODEC);
 		producerMetadata.setBatchBytes(batchBytes);
 		producerMetadata.setCompressionType(compressionType);
 		Properties additionalProps = new Properties();
 		additionalProps.setProperty(ProducerConfig.LINGER_MS_CONFIG, Integer.toString(maxQueueBufferingTime));
 		additionalProps.setProperty(ProducerConfig.ACKS_CONFIG, Integer.toString(requiredAcks));
-		ProducerFactoryBean<Key,Long> producerFactoryBean = new ProducerFactoryBean<>(producerMetadata,
-				leader.toString(), additionalProps);
+		additionalProps.setProperty(CONNECTIONS_MAX_IDLE_MS_CONFIG, "6000000");
+
+		if(customProperties != null) {
+			for (String propertyName : customProperties.stringPropertyNames()) {
+				additionalProps.setProperty(propertyName, customProperties.getProperty(propertyName));
+			}
+		}
+		ProducerFactoryBean<Key, Long> producerFactoryBean =
+				new ProducerFactoryBean<>(producerMetadata, leader.toString(), additionalProps);
 		this.producer = producerFactoryBean.getObject();
 	}
 
 	private static int intFromBytes(byte[] bytes, int start) {
-		return bytes[start] << 24 | (bytes[start + 1] & 0xFF) << 16
-				| (bytes[start + 2] & 0xFF) << 8 | (bytes[start + 3] & 0xFF);
+		return bytes[start] << 24 | (bytes[start + 1] & 0xFF) << 16 | (bytes[start + 2] & 0xFF) << 8 | (bytes[start + 3]
+				& 0xFF);
 	}
 
 	private static byte[] intToBytes(Integer message) {
 		int value = message;
-		return new byte[] {
-				(byte) (value >>> 24),
-				(byte) (value >>> 16),
-				(byte) (value >>> 8),
-				(byte) value
-		};
+		return new byte[] { (byte) (value >>> 24), (byte) (value >>> 16), (byte) (value >>> 8), (byte) value };
 	}
 
 	/**
@@ -425,8 +425,12 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 
 		@Override
 		public boolean equals(Object o) {
-			if (this == o) return true;
-			if (o == null || getClass() != o.getClass()) return false;
+			if (this == o) {
+				return true;
+			}
+			if (o == null || getClass() != o.getClass()) {
+				return false;
+			}
 
 			Key key = (Key) o;
 
@@ -460,8 +464,7 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 				return new Key(new String(bytes, 4, consumerIdSize),
 						new Partition(new String(bytes, consumerIdSize + 8, topicIdSize),
 								intFromBytes(bytes, consumerIdSize + topicIdSize + 8)));
-			}
-			catch (Exception e) {
+			} catch (Exception e) {
 				if (log.isDebugEnabled()) {
 					log.debug("Cannot decode key:" + LoggingUtils.asCommaSeparatedHexDump(bytes));
 				}
@@ -490,8 +493,7 @@ public class KafkaTopicOffsetManager extends AbstractOffsetManager implements In
 				System.arraycopy(topicNameBytes, 0, result, consumerIdBytes.length + 8, topicNameBytes.length);
 				System.arraycopy(partitionIdBytes, 0, result, consumerIdBytes.length + topicNameBytes.length + 8, 4);
 				return result;
-			}
-			catch (Exception e) {
+			} catch (Exception e) {
 				throw new RuntimeException(e);
 			}
 		}

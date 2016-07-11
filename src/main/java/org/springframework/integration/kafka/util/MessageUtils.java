@@ -16,10 +16,10 @@
 
 package org.springframework.integration.kafka.util;
 
+import org.apache.kafka.common.utils.Utils;
 import org.springframework.integration.kafka.core.KafkaMessage;
 
 import kafka.serializer.Decoder;
-import kafka.utils.Utils$;
 
 /**
  * @author Marius Bogoevici
@@ -30,14 +30,14 @@ public class MessageUtils {
 		if (!message.getMessage().hasKey()) {
 			return null;
 		}
-		return decoder.fromBytes(Utils$.MODULE$.readBytes(message.getMessage().key()));
+		return decoder.fromBytes(Utils.readBytes(message.getMessage().key()));
 	}
 
 	public static <T> T decodePayload(KafkaMessage message, Decoder<T> decoder) {
 		if (message.getMessage().isNull()) {
 			return null;
 		}
-		return decoder.fromBytes(Utils$.MODULE$.readBytes(message.getMessage().payload()));
+		return decoder.fromBytes(Utils.readBytes(message.getMessage().payload()));
 	}
 
 }

@@ -15,8 +15,10 @@
  */
 package org.springframework.integration.kafka.support;
 
-import kafka.producer.Partitioner;
-import kafka.utils.Utils;
+import java.util.Map;
+
+import org.apache.kafka.clients.producer.Partitioner;
+import org.apache.kafka.common.Cluster;
 
 /**
  * @author Soby Chacko
@@ -32,8 +34,17 @@ class DefaultPartitioner implements Partitioner {
 	 * @return an integer between 0 and numPartitions-1
 	 */
 	@Override
-	public int partition(final Object key, final int numPartitions) {
-		return Utils.abs(key.hashCode()) % numPartitions;
+	public int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster) {
+		return Math.abs(key.hashCode()) % cluster.partitionCountForTopic(topic);
 	}
 
+	@Override
+	public void close() {
+
+	}
+
+	@Override
+	public void configure(Map<String, ?> configs) {
+
+	}
 }

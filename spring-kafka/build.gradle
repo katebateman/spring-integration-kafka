@@ -68,12 +68,12 @@ subprojects { subproject ->
 		gsCollectionsVersion = '5.0.0'
 		hamcrestVersion = '1.3'
 		junitVersion = '4.11'
-		kafkaVersion = '0.9.0.1'
+		kafkaVersion = '0.10.0.0'
 		log4jVersion = '1.2.17'
 		mockitoVersion = '1.9.5'
-	//	metricsVersion = '2.2.0'
+		//	metricsVersion = '2.2.0'
 		scalaVersion = '2.11'
-		reactor2Version = '2.0.6.RELEASE'
+		reactor2Version = '2.0.7.RELEASE'
 		springRetryVersion = '1.1.2.RELEASE'
 		springVersion = '4.2.5.RELEASE'
 
@@ -155,8 +155,8 @@ project ('spring-kafka-test') {
 		//
 		// compile "org.apache.kafka:kafka-clients:$kafkaVersion"
 
-	//	runtime "com.yammer.metrics:metrics-core:$metricsVersion"
-	//	runtime "com.yammer.metrics:metrics-annotation:$metricsVersion"
+		//	runtime "com.yammer.metrics:metrics-core:$metricsVersion"
+		//	runtime "com.yammer.metrics:metrics-annotation:$metricsVersion"
 
 		compile "org.springframework:spring-test:$springVersion"
 		compile "org.springframework.retry:spring-retry:$springRetryVersion"
@@ -184,17 +184,17 @@ asciidoctor {
 	backends = ['html5', 'docbook']
 	logDocuments = true
 	options = [
-		doctype: 'book',
-		attributes: [
-			docinfo: '',
-			toc2: '',
-			'compat-mode': '',
-			imagesdir: '',
-			stylesdir: "stylesheets/",
-			stylesheet: 'golo.css',
-			'spring-kafka-version': "$version",
-			'source-highlighter': 'highlightjs'
-		]
+			doctype: 'book',
+			attributes: [
+					docinfo: '',
+					toc2: '',
+					'compat-mode': '',
+					imagesdir: '',
+					stylesdir: "stylesheets/",
+					stylesheet: 'golo.css',
+					'spring-kafka-version': "$version",
+					'source-highlighter': 'highlightjs'
+			]
 	]
 }
 

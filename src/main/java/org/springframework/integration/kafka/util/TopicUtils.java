@@ -19,11 +19,15 @@ package org.springframework.integration.kafka.util;
 import java.util.List;
 import java.util.Properties;
 
+import kafka.admin.RackAwareMode;
 import kafka.common.LeaderNotAvailableException;
+
 import org.I0Itec.zkclient.ZkClient;
+import org.I0Itec.zkclient.ZkConnection;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
+import org.apache.kafka.common.requests.MetadataResponse;
 import org.springframework.integration.kafka.core.TopicNotFoundException;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.RetryContext;
@@ -40,6 +44,7 @@ import kafka.common.ErrorMapping;
 import kafka.javaapi.PartitionMetadata;
 import kafka.utils.ZKStringSerializer$;
 import kafka.utils.ZkUtils;
+import scala.Option;
 import scala.collection.Map;
 import scala.collection.Seq;
 
@@ -71,40 +76,42 @@ public class TopicUtils {
 	 * @param replicationFactor the replication factor
 	 * @return {@link TopicMetadata} information for the topic
 	 */
-	public static TopicMetadata ensureTopicCreated(final String zkAddress, final String topicName,
+	public static MetadataResponse.TopicMetadata ensureTopicCreated(final String zkAddress, final String topicName,
 			final int numPartitions, int replicationFactor) {
 
 		final int sessionTimeoutMs = 10000;
 		final int connectionTimeoutMs = 10000;
-		final ZkClient zkClient = new ZkClient(zkAddress, sessionTimeoutMs, connectionTimeoutMs,
-				ZKStringSerializer$.MODULE$);
+		final ZkClient zkClient =
+				new ZkClient(zkAddress, sessionTimeoutMs, connectionTimeoutMs, ZKStringSerializer$.MODULE$);
+		final ZkUtils zkUtils = new ZkUtils(zkClient, new ZkConnection(zkAddress), false);
 		try {
 			// The following is basically copy/paste from AdminUtils.createTopic() with
 			// createOrUpdateTopicPartitionAssignmentPathInZK(..., update=true)
 			Properties topicConfig = new Properties();
-			Seq<Object> brokerList = ZkUtils.getSortedBrokerList(zkClient);
-			scala.collection.Map<Object, Seq<Object>> replicaAssignment =
-					AdminUtils.assignReplicasToBrokers(brokerList, numPartitions, replicationFactor, -1, -1);
-			return ensureTopicCreated(zkClient, topicName, numPartitions, topicConfig, replicaAssignment);
+			Seq<Object> brokerList = zkUtils.getSortedBrokerList();
+			scala.collection.Map<Object, Seq<Object>> replicaAssignment = AdminUtils.assignReplicasToBrokers(
+					AdminUtils.getBrokerMetadatas(zkUtils, RackAwareMode.Disabled$.MODULE$, Option.apply(brokerList)),
+					numPartitions, replicationFactor, -1, -1);
+			return ensureTopicCreated(zkUtils, topicName, numPartitions, topicConfig, replicaAssignment);
 
-		}
-		finally {
+		} finally {
 			zkClient.close();
 		}
 	}
 
 	/**
 	 * Creates a topic in Kafka and returns only after the topic has been fully and an produce metadata.
-	 * @param zkClient an open {@link ZkClient} connection to Zookeeper
+	 * @param zkUtils an open {@link ZkUtils} connection to Zookeeper
 	 * @param topicName the name of the topic
 	 * @param numPartitions the number of partitions for the topic
 	 * @param topicConfig additional topic configuration properties
 	 * @param replicaAssignment the mapping of partitions to broker
 	 * @return {@link TopicMetadata} information for the topic
 	 */
-	public static TopicMetadata ensureTopicCreated(final ZkClient zkClient, final String topicName,
+	public static MetadataResponse.TopicMetadata ensureTopicCreated(final ZkUtils zkUtils, final String topicName,
 			final int numPartitions, Properties topicConfig, Map<Object, Seq<Object>> replicaAssignment) {
-		AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK(zkClient, topicName, replicaAssignment, topicConfig,
+
+		AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK(zkUtils, topicName, replicaAssignment, topicConfig,
 				true);
 
 		RetryTemplate retryTemplate = new RetryTemplate();
@@ -114,7 +121,7 @@ public class TopicUtils {
 		timeoutRetryPolicy.setTimeout(METADATA_VERIFICATION_TIMEOUT);
 		SimpleRetryPolicy simpleRetryPolicy = new SimpleRetryPolicy();
 		simpleRetryPolicy.setMaxAttempts(METADATA_VERIFICATION_RETRY_ATTEMPTS);
-		policy.setPolicies(new RetryPolicy[] {timeoutRetryPolicy, simpleRetryPolicy});
+		policy.setPolicies(new RetryPolicy[] { timeoutRetryPolicy, simpleRetryPolicy });
 		retryTemplate.setRetryPolicy(policy);
 
 		ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
@@ -124,24 +131,24 @@ public class TopicUtils {
 		retryTemplate.setBackOffPolicy(backOffPolicy);
 
 		try {
-			return retryTemplate.execute(new RetryCallback<TopicMetadata, Exception>() {
+			return retryTemplate.execute(new RetryCallback<MetadataResponse.TopicMetadata, Exception>() {
 				@Override
-				public TopicMetadata doWithRetry(RetryContext context) throws Exception {
-					TopicMetadata topicMetadata = AdminUtils.fetchTopicMetadataFromZk(topicName, zkClient);
-					if (topicMetadata.errorCode() != ErrorMapping.NoError() ||
-							!topicName.equals(topicMetadata.topic())) {
+				public MetadataResponse.TopicMetadata doWithRetry(RetryContext context) throws Exception {
+					MetadataResponse.TopicMetadata topicMetadata =
+							AdminUtils.fetchTopicMetadataFromZk(topicName, zkUtils);
+					if (topicMetadata.error().code() != ErrorMapping.NoError() || !topicName
+							.equals(topicMetadata.topic())) {
 						// downcast to Exception because that's what the error throws
-						throw (Exception) ErrorMapping.exceptionFor(topicMetadata.errorCode());
+						throw (Exception) ErrorMapping.exceptionFor(topicMetadata.error().code());
 					}
-					List<PartitionMetadata> partitionMetadatas =
-							new kafka.javaapi.TopicMetadata(topicMetadata).partitionsMetadata();
+					List<MetadataResponse.PartitionMetadata> partitionMetadatas = (topicMetadata).partitionMetadata();
 					if (partitionMetadatas.size() != numPartitions) {
 						throw new IllegalStateException("The number of expected partitions was: " +
 								numPartitions + ", but " + partitionMetadatas.size() + " have been found instead");
 					}
-					for (PartitionMetadata partitionMetadata : partitionMetadatas) {
-						if (partitionMetadata.errorCode() != ErrorMapping.NoError()) {
-							throw (Exception) ErrorMapping.exceptionFor(partitionMetadata.errorCode());
+					for (MetadataResponse.PartitionMetadata partitionMetadata : partitionMetadatas) {
+						if (partitionMetadata.error().code() != ErrorMapping.NoError()) {
+							throw (Exception) ErrorMapping.exceptionFor(partitionMetadata.error().code());
 						}
 						if (partitionMetadata.leader() == null) {
 							throw new LeaderNotAvailableException();
@@ -150,8 +157,7 @@ public class TopicUtils {
 					return topicMetadata;
 				}
 			});
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			log.error(String.format("Cannot retrieve metadata for topic '%s'", topicName), e);
 			throw new TopicNotFoundException(topicName);
 		}

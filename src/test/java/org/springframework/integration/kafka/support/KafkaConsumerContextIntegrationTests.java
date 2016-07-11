@@ -44,6 +44,7 @@ import org.springframework.messaging.support.MessageBuilder;
 
 import kafka.admin.AdminUtils;
 import kafka.consumer.ConsumerConfig;
+import kafka.utils.ZkUtils;
 
 /**
  * @author Gary Russell
@@ -53,90 +54,88 @@ import kafka.consumer.ConsumerConfig;
 @SuppressWarnings("deprecation")
 public class KafkaConsumerContextIntegrationTests {
 
-	private static final String TOPIC = "springIntegrationTestInbound";
+    private static final String TOPIC = "springIntegrationTestInbound";
 
-	@Rule
-	public KafkaRule kafkaRule = new KafkaEmbedded(1);
+    @Rule
+    public KafkaRule kafkaRule = new KafkaEmbedded(1);
 
-	@After
-	public void tearDown() {
-		AdminUtils.deleteTopic(kafkaRule.getZkClient(), TOPIC);
-	}
+    @After
+    public void tearDown() {
+        AdminUtils.deleteTopic(new ZkUtils(kafkaRule.getZkClient(), null, false), TOPIC);
+    }
 
-	@Test
-	public void test() throws Exception {
-		TopicUtils.ensureTopicCreated(kafkaRule.getZookeeperConnectionString(), TOPIC, 1, 1);
+    @Test
+    public void test() throws Exception {
+        TopicUtils.ensureTopicCreated(kafkaRule.getZookeeperConnectionString(), TOPIC, 1, 1);
 
-		final String suffix = UUID.randomUUID().toString();
+        final String suffix = UUID.randomUUID().toString();
 
-		KafkaProducerContext producerContext = createProducerContext();
-		KafkaProducerMessageHandler handler =
-				new KafkaProducerMessageHandler(producerContext);
+        KafkaProducerContext producerContext = createProducerContext();
+        KafkaProducerMessageHandler handler = new KafkaProducerMessageHandler(producerContext);
 
-		Message<String> msg = MessageBuilder.withPayload("foo" + suffix)
-				.setHeader(KafkaHeaders.MESSAGE_KEY, "3")
-				.setHeader(KafkaHeaders.TOPIC, TOPIC)
-				.build();
-		handler.handleMessage(msg);
+        Message<String> msg = MessageBuilder.withPayload("foo" + suffix).setHeader(KafkaHeaders.MESSAGE_KEY, "3")
+                .setHeader(KafkaHeaders.TOPIC, TOPIC).build();
+        handler.handleMessage(msg);
 
-		KafkaConsumerContext<?, ?> kafkaConsumerContext = createConsumerContext();
+        KafkaConsumerContext<?, ?> kafkaConsumerContext = createConsumerContext();
 
-		Message<?> received = kafkaConsumerContext.receive();
-		assertNotNull(received);
-		Map<?, ?> payload = (Map<?, ?>) received.getPayload();
-		assertNotNull(payload);
-		Map<?, ?> topicMap = (Map<?, ?>) payload.get(TOPIC);
-		assertNotNull(topicMap);
-		List<?> list = (List<?>) topicMap.get(0);
-		assertNotNull(list);
-		assertThat(list.size(), greaterThanOrEqualTo(1));
-		assertEquals("foo" + suffix, list.get(0));
-	}
+        Message<?> received = kafkaConsumerContext.receive();
+        assertNotNull(received);
+        Map<?, ?> payload = (Map<?, ?>) received.getPayload();
+        assertNotNull(payload);
+        Map<?, ?> topicMap = (Map<?, ?>) payload.get(TOPIC);
+        assertNotNull(topicMap);
+        List<?> list = (List<?>) topicMap.get(0);
+        assertNotNull(list);
+        assertThat(list.size(), greaterThanOrEqualTo(1));
+        assertEquals("foo" + suffix, list.get(0));
+    }
 
-	@SuppressWarnings({"rawtypes", "unchecked"})
-	private KafkaConsumerContext createConsumerContext() {
-		KafkaConsumerContext kafkaConsumerContext = new KafkaConsumerContext();
-		Map<String, ConsumerConfiguration> map = new HashMap<>();
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    private KafkaConsumerContext createConsumerContext() {
+        KafkaConsumerContext kafkaConsumerContext = new KafkaConsumerContext();
+        Map<String, ConsumerConfiguration> map = new HashMap<>();
 
-		ConsumerMetadata consumerMetadata = new ConsumerMetadata();
-		consumerMetadata.setGroupId("foo");
-		consumerMetadata.setValueDecoder(new StringDecoder());
-		consumerMetadata.setKeyDecoder(new StringDecoder());
+        ConsumerMetadata consumerMetadata = new ConsumerMetadata();
+        consumerMetadata.setGroupId("foo");
+        consumerMetadata.setValueDecoder(new StringDecoder());
+        consumerMetadata.setKeyDecoder(new StringDecoder());
 
-		Map<String, Integer> topicStreamMap = new HashMap<>();
-		topicStreamMap.put(TOPIC, 1);
-		consumerMetadata.setTopicStreamMap(topicStreamMap);
+        Map<String, Integer> topicStreamMap = new HashMap<>();
+        topicStreamMap.put(TOPIC, 1);
+        consumerMetadata.setTopicStreamMap(topicStreamMap);
 
-		Properties properties = new Properties();
-		properties.put("zookeeper.connect", kafkaRule.getZookeeperConnectionString());
-		properties.put("group.id", "foo");
-		ConsumerConfig consumerConfig = new ConsumerConfig(properties);
-		ConsumerConnectionProvider consumerConnectionProvider = new ConsumerConnectionProvider(consumerConfig);
+        Properties properties = new Properties();
+        properties.put("zookeeper.connect", kafkaRule.getZookeeperConnectionString());
+        properties.put("group.id", "foo");
+        ConsumerConfig consumerConfig = new ConsumerConfig(properties);
+        ConsumerConnectionProvider consumerConnectionProvider = new ConsumerConnectionProvider(consumerConfig);
 
-		MessageLeftOverTracker messageLeftOverTracker = mock(MessageLeftOverTracker.class);
-		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(consumerMetadata,
-				consumerConnectionProvider, messageLeftOverTracker);
-		map.put("config", consumerConfiguration);
+        MessageLeftOverTracker messageLeftOverTracker = mock(MessageLeftOverTracker.class);
+        ConsumerConfiguration consumerConfiguration =
+                new ConsumerConfiguration(consumerMetadata, consumerConnectionProvider, messageLeftOverTracker);
+        map.put("config", consumerConfiguration);
 
-		kafkaConsumerContext.setConsumerConfigurations(map);
-		return kafkaConsumerContext;
-	}
+        kafkaConsumerContext.setConsumerConfigurations(map);
+        return kafkaConsumerContext;
+    }
 
-	private KafkaProducerContext createProducerContext() throws Exception {
-		KafkaProducerContext kafkaProducerContext = new KafkaProducerContext();
-		ProducerMetadata<String, String> producerMetadata = new ProducerMetadata<>(TOPIC, String.class, String.class,
-				new StringSerializer(), new StringSerializer());
+    private KafkaProducerContext createProducerContext() throws Exception {
+        KafkaProducerContext kafkaProducerContext = new KafkaProducerContext();
+        ProducerMetadata<String, String> producerMetadata =
+                new ProducerMetadata<>(TOPIC, String.class, String.class, new StringSerializer(),
+                        new StringSerializer());
 
-		Properties props = new Properties();
-		props.put("linger.ms", "1000");
-		ProducerFactoryBean<String, String> producer =
-				new ProducerFactoryBean<>(producerMetadata, kafkaRule.getBrokersAsString(), props);
-		ProducerConfiguration<String, String> config =
-				new ProducerConfiguration<>(producerMetadata, producer.getObject());
-		Map<String, ProducerConfiguration<?, ?>> producerConfigurationMap =
-				Collections.<String, ProducerConfiguration<?, ?>>singletonMap(TOPIC, config);
-		kafkaProducerContext.setProducerConfigurations(producerConfigurationMap);
-		return kafkaProducerContext;
-	}
+        Properties props = new Properties();
+        props.put("linger.ms", "1000");
+        ProducerFactoryBean<String, String> producer =
+                new ProducerFactoryBean<>(producerMetadata, kafkaRule.getBrokersAsString(), props);
+        ProducerConfiguration<String, String> config =
+                new ProducerConfiguration<>(producerMetadata, producer.getObject());
+        Map<String, ProducerConfiguration<?, ?>> producerConfigurationMap =
+                Collections.<String, ProducerConfiguration<?, ?>>singletonMap(TOPIC, config);
+        kafkaProducerContext.setProducerConfigurations(producerConfigurationMap);
+        return kafkaProducerContext;
+    }
 
 }

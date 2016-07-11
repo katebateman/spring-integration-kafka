@@ -31,11 +31,15 @@ import com.gs.collections.impl.list.mutable.FastList;
 import com.gs.collections.impl.tuple.Tuples;
 import com.gs.collections.impl.utility.LazyIterate;
 import com.gs.collections.impl.utility.MapIterate;
+
 import kafka.api.FetchRequestBuilder;
 import kafka.api.PartitionOffsetRequestInfo;
 import kafka.cluster.Broker;
+import kafka.cluster.BrokerEndPoint;
 import kafka.common.ErrorMapping;
 import kafka.common.OffsetAndMetadata;
+import kafka.common.OffsetAndMetadata$;
+import kafka.common.OffsetMetadata;
 import kafka.common.OffsetMetadataAndError;
 import kafka.common.TopicAndPartition;
 import kafka.javaapi.FetchResponse;
@@ -52,6 +56,7 @@ import kafka.javaapi.TopicMetadataResponse;
 import kafka.javaapi.consumer.SimpleConsumer;
 import kafka.javaapi.message.ByteBufferMessageSet;
 import kafka.message.MessageAndOffset;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
@@ -76,8 +81,8 @@ public class DefaultConnection implements Connection {
 
 	private int maxWait;
 
-	public DefaultConnection(BrokerAddress brokerAddress, String clientId, int bufferSize, int soTimeout,
-			int minBytes, int maxWait) {
+	public DefaultConnection(BrokerAddress brokerAddress, String clientId, int bufferSize, int soTimeout, int minBytes,
+			int maxWait) {
 		this.brokerAddress = brokerAddress;
 		this.minBytes = minBytes;
 		this.maxWait = maxWait;
@@ -115,8 +120,7 @@ public class DefaultConnection implements Connection {
 		FetchResponse fetchResponse;
 		try {
 			fetchResponse = this.simpleConsumer.fetch(fetchRequestBuilder.maxWait(maxWait).minBytes(minBytes).build());
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			throw new ConsumerException(e);
 		}
 		ResultBuilder<KafkaMessageBatch> resultBuilder = new ResultBuilder<KafkaMessageBatch>();
@@ -128,12 +132,11 @@ public class DefaultConnection implements Connection {
 			short errorCode = fetchResponse.errorCode(partition.getTopic(), partition.getId());
 			if (ErrorMapping.NoError() == errorCode) {
 				ByteBufferMessageSet messageSet = fetchResponse.messageSet(partition.getTopic(), partition.getId());
-				List<KafkaMessage> kafkaMessages = LazyIterate.collect(messageSet,
-						new ConvertToKafkaMessageFunction(request)).toList();
+				List<KafkaMessage> kafkaMessages =
+						LazyIterate.collect(messageSet, new ConvertToKafkaMessageFunction(request)).toList();
 				long highWatermark = fetchResponse.highWatermark(partition.getTopic(), partition.getId());
 				resultBuilder.add(partition).withResult(new KafkaMessageBatch(partition, kafkaMessages, highWatermark));
-			}
-			else {
+			} else {
 				resultBuilder.add(partition).withError(errorCode);
 			}
 		}
@@ -141,28 +144,27 @@ public class DefaultConnection implements Connection {
 	}
 
 	@Override
-	public Result<Long> fetchStoredOffsetsForConsumer(String consumerId, Partition... partitions) throws
-			ConsumerException {
-		FastList<TopicAndPartition> topicsAndPartitions = FastList.newList(Arrays.asList(partitions))
-				.collect(new ConvertToTopicAndPartitionFunction());
-		OffsetFetchRequest offsetFetchRequest = new OffsetFetchRequest(consumerId, topicsAndPartitions,
-				kafka.api.OffsetFetchRequest.CurrentVersion(), createCorrelationId(), simpleConsumer.clientId());
+	public Result<Long> fetchStoredOffsetsForConsumer(String consumerId, Partition... partitions)
+			throws ConsumerException {
+		FastList<TopicAndPartition> topicsAndPartitions =
+				FastList.newList(Arrays.asList(partitions)).collect(new ConvertToTopicAndPartitionFunction());
+		OffsetFetchRequest offsetFetchRequest =
+				new OffsetFetchRequest(consumerId, topicsAndPartitions, kafka.api.OffsetFetchRequest.CurrentVersion(),
+						createCorrelationId(), simpleConsumer.clientId());
 		OffsetFetchResponse offsetFetchResponse = null;
 		try {
 			offsetFetchResponse = simpleConsumer.fetchOffsets(offsetFetchRequest);
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			throw new ConsumerException(e);
 		}
 		ResultBuilder<Long> resultBuilder = new ResultBuilder<Long>();
 		for (Partition partition : partitions) {
-			OffsetMetadataAndError offsetMetadataAndError
-					= offsetFetchResponse.offsets().get(new TopicAndPartition(partition.getTopic(), partition.getId()));
+			OffsetMetadataAndError offsetMetadataAndError =
+					offsetFetchResponse.offsets().get(new TopicAndPartition(partition.getTopic(), partition.getId()));
 			short errorCode = offsetMetadataAndError.error();
 			if (ErrorMapping.NoError() == errorCode) {
 				resultBuilder.add(partition).withResult(offsetMetadataAndError.offset());
-			}
-			else {
+			} else {
 				resultBuilder.add(partition).withError(errorCode);
 			}
 		}
@@ -173,10 +175,10 @@ public class DefaultConnection implements Connection {
 	 * @see Connection#fetchInitialOffset(long, Partition...)
 	 */
 	@Override
-	public Result<Long> fetchInitialOffset(long referenceTime, Partition... partitions) throws
-			ConsumerException {
+	public Result<Long> fetchInitialOffset(long referenceTime, Partition... partitions) throws ConsumerException {
 		Assert.isTrue(partitions.length > 0, "Must provide at least one partition");
-		Map<TopicAndPartition, PartitionOffsetRequestInfo> infoMap = new HashMap<TopicAndPartition, PartitionOffsetRequestInfo>();
+		Map<TopicAndPartition, PartitionOffsetRequestInfo> infoMap =
+				new HashMap<TopicAndPartition, PartitionOffsetRequestInfo>();
 		for (Partition partition : partitions) {
 			infoMap.put(new TopicAndPartition(partition.getTopic(), partition.getId()),
 					new PartitionOffsetRequestInfo(referenceTime, 1));
@@ -186,8 +188,7 @@ public class DefaultConnection implements Connection {
 		OffsetResponse offsetResponse = null;
 		try {
 			offsetResponse = simpleConsumer.getOffsetsBefore(offsetRequest);
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			throw new ConsumerException(e);
 		}
 		ResultBuilder<Long> resultBuilder = new ResultBuilder<Long>();
@@ -199,12 +200,11 @@ public class DefaultConnection implements Connection {
 					// normally, we shouldn't get here - either an offset has been returned,
 					// or an error. However, in case something went wrong, the check protects against an
 					// ArrayIndexOutOfBoundsException
-					throw new ConsumerException("Inconsistent response: no error has been returned, " +
-							"but no offsets either");
+					throw new ConsumerException(
+							"Inconsistent response: no error has been returned, " + "but no offsets either");
 				}
 				resultBuilder.add(partition).withResult(offsets[0]);
-			}
-			else {
+			} else {
 				resultBuilder.add(partition).withError(errorCode);
 			}
 		}
@@ -219,10 +219,9 @@ public class DefaultConnection implements Connection {
 		OffsetCommitResponse offsetCommitResponse = null;
 		try {
 			offsetCommitResponse = simpleConsumer.commitOffsets(
-					new OffsetCommitRequest(consumerId, requestInfo, createCorrelationId(),
-							simpleConsumer.clientId(), kafka.api.OffsetCommitRequest.CurrentVersion()));
-		}
-		catch (Exception e) {
+					new OffsetCommitRequest(consumerId, requestInfo, createCorrelationId(), simpleConsumer.clientId(),
+							kafka.api.OffsetCommitRequest.CurrentVersion()));
+		} catch (Exception e) {
 			throw new ConsumerException(e);
 		}
 		ResultBuilder<Void> resultBuilder = new ResultBuilder<Void>();
@@ -246,24 +245,21 @@ public class DefaultConnection implements Connection {
 		TopicMetadataResponse topicMetadataResponse = null;
 		try {
 			topicMetadataResponse = simpleConsumer.send(topicMetadataRequest);
-		}
-		catch (Exception e) {
+		} catch (Exception e) {
 			throw new ConsumerException(e);
 		}
 		ResultBuilder<BrokerAddress> resultBuilder = new ResultBuilder<BrokerAddress>();
 		for (TopicMetadata topicMetadata : topicMetadataResponse.topicsMetadata()) {
 			if (topicMetadata.errorCode() != ErrorMapping.NoError()) {
 				resultBuilder.add(new Partition(topicMetadata.topic(), -1)).withError(topicMetadata.errorCode());
-			}
-			else {
+			} else {
 				for (PartitionMetadata partitionMetadata : topicMetadata.partitionsMetadata()) {
 					Partition partition = new Partition(topicMetadata.topic(), partitionMetadata.partitionId());
 					if (ErrorMapping.NoError() == partitionMetadata.errorCode()) {
-						Broker leader = partitionMetadata.leader();
+						BrokerEndPoint leader = partitionMetadata.leader();
 						BrokerAddress result = new BrokerAddress(leader.host(), leader.port());
 						resultBuilder.add(partition).withResult(result);
-					}
-					else {
+					} else {
 						resultBuilder.add(partition).withError(partitionMetadata.errorCode());
 					}
 				}
@@ -272,8 +268,6 @@ public class DefaultConnection implements Connection {
 		}
 		return resultBuilder.build();
 	}
-
-
 
 	/**
 	 * Creat a pseudo-unique correlation id for requests and responses
@@ -316,7 +310,7 @@ public class DefaultConnection implements Connection {
 		@Override
 		public Pair<TopicAndPartition, OffsetAndMetadata> value(Partition partition, Long offset) {
 			return Tuples.pair(new TopicAndPartition(partition.getTopic(), partition.getId()),
-					new OffsetAndMetadata(offset, OffsetAndMetadata.NoMetadata(), OffsetAndMetadata.InvalidTime()));
+					new OffsetAndMetadata(new OffsetMetadata(offset, OffsetMetadata.NoMetadata()), 0L, 0L));
 		}
 
 	}

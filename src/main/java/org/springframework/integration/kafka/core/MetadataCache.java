@@ -22,6 +22,8 @@ import java.util.Map;
 import com.gs.collections.api.block.function.Function;
 import com.gs.collections.impl.map.mutable.UnifiedMap;
 import com.gs.collections.impl.utility.Iterate;
+
+import kafka.cluster.BrokerEndPoint;
 import kafka.javaapi.PartitionMetadata;
 import kafka.javaapi.TopicMetadata;
 
@@ -61,7 +63,7 @@ class MetadataCache {
 	public Collection<Partition> getPartitions(String topic) {
 		if (this.metadatasByTopic.containsKey(topic)) {
 			return this.metadatasByTopic.get(topic).keySet();
-		} 
+		}
 		else {
 			return null;
 		}
@@ -75,7 +77,8 @@ class MetadataCache {
 		if (!partitionMetadatasForTopic.containsKey(partition)) {
 			return null;
 		}
-		return new BrokerAddress(partitionMetadatasForTopic.get(partition).leader());
+		BrokerEndPoint endPoint = partitionMetadatasForTopic.get(partition).leader();
+		return new BrokerAddress(endPoint.host(), endPoint.port());
 	}
 
 
@@ -89,23 +92,23 @@ class MetadataCache {
 
 	@SuppressWarnings("serial")
 	private static class GetTopicNameFunction implements Function<TopicMetadata, String> {
-		
+
 		@Override
 		public String valueOf(TopicMetadata object) {
 			return object.topic();
 		}
-		
+
 	}
 
 	@SuppressWarnings("serial")
 	private static class ToIndexedPartitionMetadataFunction implements
 			Function<TopicMetadata, Map<Partition, PartitionMetadata>> {
-		
+
 		@Override
 		public Map<Partition, PartitionMetadata> valueOf(TopicMetadata object) {
 			return toPartitionMetadataMap(object);
 		}
-		
+
 	}
-	
+
 }
