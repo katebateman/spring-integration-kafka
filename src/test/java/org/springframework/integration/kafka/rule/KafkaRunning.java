@@ -29,8 +29,10 @@ import kafka.utils.ZKStringSerializer$;
 import kafka.utils.ZkUtils;
 
 import org.I0Itec.zkclient.ZkClient;
+import org.I0Itec.zkclient.ZkConnection;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.kafka.common.protocol.SecurityProtocol;
 import org.junit.Assume;
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
@@ -57,73 +59,73 @@ import org.springframework.integration.kafka.core.ZookeeperConnectDefaults;
  */
 public class KafkaRunning extends TestWatcher implements KafkaRule {
 
-	private static final String ZOOKEEPER_CONNECT_STRING = ZookeeperConnectDefaults.ZK_CONNECT;
+    private static final String ZOOKEEPER_CONNECT_STRING = ZookeeperConnectDefaults.ZK_CONNECT;
 
-	private static final Log logger = LogFactory.getLog(KafkaRunning.class);
+    private static final Log logger = LogFactory.getLog(KafkaRunning.class);
 
-	private ZkClient zkClient;
+    private ZkClient zkClient;
 
-	/**
-	 * @return a new rule that assumes an existing running broker
-	 */
-	public static KafkaRunning isRunning() {
-		return new KafkaRunning();
-	}
+    /**
+     * @return a new rule that assumes an existing running broker
+     */
+    public static KafkaRunning isRunning() {
+        return new KafkaRunning();
+    }
 
-	public ZkClient getZkClient() {
-		return zkClient;
-	}
+    public ZkClient getZkClient() {
+        return zkClient;
+    }
 
-	@Override
-	public String getZookeeperConnectionString() {
-		return ZOOKEEPER_CONNECT_STRING;
-	}
+    @Override
+    public String getZookeeperConnectionString() {
+        return ZOOKEEPER_CONNECT_STRING;
+    }
 
-	@Override
-	@SuppressWarnings("serial")
-	public BrokerAddress[] getBrokerAddresses() {
-		Seq<Broker> allBrokersInCluster = ZkUtils.getAllBrokersInCluster(zkClient);
-		return ListIterate.collect(JavaConversions.asJavaList(allBrokersInCluster),
-				new Function<Broker, BrokerAddress>() {
+    @Override
+    @SuppressWarnings("serial")
+    public BrokerAddress[] getBrokerAddresses() {
+        ZkUtils utils = new ZkUtils(zkClient, new ZkConnection(getZookeeperConnectionString()), false);
+        Seq<Broker> allBrokersInCluster = utils.getAllBrokersInCluster();
+        return ListIterate
+                .collect(JavaConversions.asJavaList(allBrokersInCluster), new Function<Broker, BrokerAddress>() {
 
-					@Override
-					public BrokerAddress valueOf(Broker broker) {
-						return new BrokerAddress(broker.host(), broker.port());
-					}
+                    @Override
+                    public BrokerAddress valueOf(Broker broker) {
+                        return new BrokerAddress(broker.getBrokerEndPoint(SecurityProtocol.PLAINTEXT).host(),
+                                broker.getBrokerEndPoint(SecurityProtocol.PLAINTEXT).port());
+                    }
 
-				})
-				.toArray(new BrokerAddress[allBrokersInCluster.size()]);
-	}
+                }).toArray(new BrokerAddress[allBrokersInCluster.size()]);
+    }
 
-	@Override
-	public String getBrokersAsString() {
-		return FastList.newList(Arrays.asList(getBrokerAddresses())).collect(Functions.getToString()).makeString(",");
-	}
+    @Override
+    public String getBrokersAsString() {
+        return FastList.newList(Arrays.asList(getBrokerAddresses())).collect(Functions.getToString()).makeString(",");
+    }
 
-	@Override
-	public boolean isEmbedded() {
-		return false;
-	}
+    @Override
+    public boolean isEmbedded() {
+        return false;
+    }
 
-	@Override
-	public List<KafkaServer> getKafkaServers() {
-		throw new UnsupportedOperationException("Not supported on the external rule");
-	}
+    @Override
+    public List<KafkaServer> getKafkaServers() {
+        throw new UnsupportedOperationException("Not supported on the external rule");
+    }
 
-	@Override
-	public Statement apply(Statement base, Description description) {
-		try {
-			this.zkClient = new ZkClient(ZOOKEEPER_CONNECT_STRING, 1000, 1000, ZKStringSerializer$.MODULE$);
-			if (getBrokerAddresses().length == 0) {
-				throw new IllegalStateException("No running Kafka brokers");
-			}
-		}
-		catch (Exception e) {
-			logger.warn("Not executing tests because basic connectivity test failed");
-			Assume.assumeNoException(e);
-		}
+    @Override
+    public Statement apply(Statement base, Description description) {
+        try {
+            this.zkClient = new ZkClient(ZOOKEEPER_CONNECT_STRING, 1000, 1000, ZKStringSerializer$.MODULE$);
+            if (getBrokerAddresses().length == 0) {
+                throw new IllegalStateException("No running Kafka brokers");
+            }
+        } catch (Exception e) {
+            logger.warn("Not executing tests because basic connectivity test failed");
+            Assume.assumeNoException(e);
+        }
 
-		return super.apply(base, description);
-	}
+        return super.apply(base, description);
+    }
 
 }

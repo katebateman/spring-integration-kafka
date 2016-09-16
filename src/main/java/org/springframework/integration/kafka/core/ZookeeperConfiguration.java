@@ -19,9 +19,10 @@ package org.springframework.integration.kafka.core;
 import java.util.List;
 
 import org.I0Itec.zkclient.ZkClient;
+import org.I0Itec.zkclient.ZkConnection;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-
+import org.apache.kafka.common.protocol.SecurityProtocol;
 import org.springframework.beans.factory.BeanInitializationException;
 import org.springframework.integration.kafka.support.ZookeeperConnect;
 
@@ -30,7 +31,7 @@ import com.gs.collections.impl.list.mutable.FastList;
 
 import kafka.cluster.Broker;
 import kafka.utils.ZKStringSerializer$;
-import kafka.utils.ZkUtils$;
+import kafka.utils.ZkUtils;
 import scala.collection.JavaConversions;
 import scala.collection.Seq;
 
@@ -41,66 +42,65 @@ import scala.collection.Seq;
  */
 public class ZookeeperConfiguration extends AbstractConfiguration {
 
-	private final static Log log = LogFactory.getLog(ZookeeperConfiguration.class);
+    private final static Log log = LogFactory.getLog(ZookeeperConfiguration.class);
 
-	public static final BrokerToBrokerAddressFunction brokerToBrokerAddressFunction = new BrokerToBrokerAddressFunction();
+    public static final BrokerToBrokerAddressFunction brokerToBrokerAddressFunction =
+            new BrokerToBrokerAddressFunction();
 
-	private String zookeeperServers;
+    private String zookeeperServers;
 
-	private int sessionTimeout;
+    private int sessionTimeout;
 
-	private int connectionTimeout;
+    private int connectionTimeout;
 
-	public ZookeeperConfiguration(String zookeeperConnectionString) {
-		this(new ZookeeperConnect(zookeeperConnectionString));
-	}
+    public ZookeeperConfiguration(String zookeeperConnectionString) {
+        this(new ZookeeperConnect(zookeeperConnectionString));
+    }
 
-	public ZookeeperConfiguration(ZookeeperConnect zookeeperConnect) {
-		this.zookeeperServers = zookeeperConnect.getZkConnect();
-		try {
-			this.sessionTimeout = Integer.parseInt(zookeeperConnect.getZkSessionTimeout());
-		}
-		catch (NumberFormatException e) {
-			throw new BeanInitializationException("Cannot parse session timeout:", e);
-		}
-		try {
-			this.connectionTimeout = Integer.parseInt(zookeeperConnect.getZkConnectionTimeout());
-		}
-		catch (NumberFormatException e) {
-			throw new BeanInitializationException("Cannot parse connection timeout:", e);
-		}
-	}
+    public ZookeeperConfiguration(ZookeeperConnect zookeeperConnect) {
+        this.zookeeperServers = zookeeperConnect.getZkConnect();
+        try {
+            this.sessionTimeout = Integer.parseInt(zookeeperConnect.getZkSessionTimeout());
+        } catch (NumberFormatException e) {
+            throw new BeanInitializationException("Cannot parse session timeout:", e);
+        }
+        try {
+            this.connectionTimeout = Integer.parseInt(zookeeperConnect.getZkConnectionTimeout());
+        } catch (NumberFormatException e) {
+            throw new BeanInitializationException("Cannot parse connection timeout:", e);
+        }
+    }
 
-	@Override
-	protected List<BrokerAddress> doGetBrokerAddresses() {
-		ZkClient zkClient = null;
-		try {
-			zkClient = new ZkClient(this.zookeeperServers, this.sessionTimeout, this.connectionTimeout,
-					ZKStringSerializer$.MODULE$);
-			Seq<Broker> allBrokersInCluster = ZkUtils$.MODULE$.getAllBrokersInCluster(zkClient);
-			FastList<Broker> brokers = FastList.newList(JavaConversions.asJavaCollection(allBrokersInCluster));
-			return brokers.collect(brokerToBrokerAddressFunction);
-		}
-		finally {
-			if (zkClient != null) {
-				try {
-					zkClient.close();
-				}
-				catch (Exception e) {
-					log.error("Cannot close Zookeeper client: ", e);
-				}
-			}
-		}
-	}
+    @Override
+    protected List<BrokerAddress> doGetBrokerAddresses() {
+        ZkClient zkClient = null;
+        try {
+            zkClient = new ZkClient(this.zookeeperServers, this.sessionTimeout, this.connectionTimeout,
+                    ZKStringSerializer$.MODULE$);
+            ZkUtils utils = new ZkUtils(zkClient, new ZkConnection(this.zookeeperServers), false);
+            Seq<Broker> allBrokersInCluster = utils.getAllBrokersInCluster();
+            FastList<Broker> brokers = FastList.newList(JavaConversions.asJavaCollection(allBrokersInCluster));
+            return brokers.collect(brokerToBrokerAddressFunction);
+        } finally {
+            if (zkClient != null) {
+                try {
+                    zkClient.close();
+                } catch (Exception e) {
+                    log.error("Cannot close Zookeeper client: ", e);
+                }
+            }
+        }
+    }
 
-	@SuppressWarnings("serial")
-	private static class BrokerToBrokerAddressFunction implements Function<Broker, BrokerAddress> {
+    @SuppressWarnings("serial")
+    private static class BrokerToBrokerAddressFunction implements Function<Broker, BrokerAddress> {
 
-		@Override
-		public BrokerAddress valueOf(Broker broker) {
-			return new BrokerAddress(broker.host(), broker.port());
-		}
+        @Override
+        public BrokerAddress valueOf(Broker broker) {
+            return new BrokerAddress(broker.getBrokerEndPoint(SecurityProtocol.PLAINTEXT).host(),
+                    broker.getBrokerEndPoint(SecurityProtocol.PLAINTEXT).port());
+        }
 
-	}
+    }
 
 }

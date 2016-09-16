@@ -17,6 +17,7 @@
 
 package org.springframework.integration.kafka.core;
 
+import org.apache.kafka.common.protocol.SecurityProtocol;
 import org.springframework.util.Assert;
 
 import kafka.cluster.Broker;
@@ -46,8 +47,8 @@ public class BrokerAddress {
 
 	public BrokerAddress(Broker broker) {
 		Assert.notNull(broker, "Broker cannot be null");
-		this.host = broker.host();
-		this.port = broker.port();
+		this.host = broker.getBrokerEndPoint(SecurityProtocol.PLAINTEXT).host();
+		this.port = broker.getBrokerEndPoint(SecurityProtocol.PLAINTEXT).port();
 	}
 
 	public static BrokerAddress fromAddress(String address) {

@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.I0Itec.zkclient.ZkClient;
-
+import org.I0Itec.zkclient.ZkConnection;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.integration.kafka.core.BrokerAddress;
 import org.springframework.integration.kafka.core.Configuration;
@@ -47,9 +47,10 @@ import com.gs.collections.impl.factory.Maps;
 
 import kafka.client.ClientUtils$;
 import kafka.common.ErrorMapping;
-import kafka.common.OffsetAndMetadata;
+import kafka.common.OffsetMetadata;
 import kafka.network.BlockingChannel;
 import kafka.utils.ZKStringSerializer$;
+import kafka.utils.ZkUtils;
 
 /**
  * Implementation of an {@link OffsetManager} that uses kafka native 'topic' offset storage.
@@ -65,6 +66,8 @@ public class KafkaNativeOffsetManager extends AbstractOffsetManager implements I
 	private final Map<Partition, BrokerAddress> offsetManagerBrokerAddressCache = new ConcurrentHashMap<>();
 
 	private final ZkClient zkClient;
+
+	private final String zkConnect;
 
 	private RetryTemplate retryTemplate;
 
@@ -85,6 +88,7 @@ public class KafkaNativeOffsetManager extends AbstractOffsetManager implements I
 									Map<Partition, Long> initialOffsets) {
 		super(connectionFactory, initialOffsets);
 		Assert.notNull(zookeeperConnect, "'zookeeperConnect' must not be null.");
+		this.zkConnect = zookeeperConnect.getZkConnect();
 		this.zkClient = new ZkClient(zookeeperConnect.getZkConnect(),
 				Integer.parseInt(zookeeperConnect.getZkSessionTimeout()),
 				Integer.parseInt(zookeeperConnect.getZkConnectionTimeout()),
@@ -161,7 +165,7 @@ public class KafkaNativeOffsetManager extends AbstractOffsetManager implements I
 
 	@Override
 	protected void doRemoveOffset(Partition partition) {
-		doUpdateOffset(partition, OffsetAndMetadata.InvalidOffset());
+		doUpdateOffset(partition, OffsetMetadata.InvalidOffset());
 	}
 
 	@Override
@@ -184,8 +188,10 @@ public class KafkaNativeOffsetManager extends AbstractOffsetManager implements I
 				socketTimeoutMs = configuration.getSocketTimeout();
 				retryBackOffMs = configuration.getBackOff();
 			}
+			ZkUtils utils = new ZkUtils(zkClient, new ZkConnection(zkConnect), false);
+
 			final BlockingChannel channel = ClientUtils$.MODULE$.channelToOffsetManager(
-					getConsumerId(), zkClient, socketTimeoutMs, retryBackOffMs);
+					getConsumerId(), utils, socketTimeoutMs, retryBackOffMs);
 			brokerAddress = new BrokerAddress(channel.host(), channel.port());
 			if (log.isDebugEnabled()) {
 				log.debug(String.format("Offset manager for [%s] is at [%s].", partition,
