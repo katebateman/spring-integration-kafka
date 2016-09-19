@@ -60,7 +60,7 @@ public class KafkaConsumerContextIntegrationTests {
 
 	@After
 	public void tearDown() {
-		AdminUtils.deleteTopic(kafkaRule.getZkClient(), TOPIC);
+		AdminUtils.deleteTopic(kafkaRule.getZkUtils(), TOPIC);
 	}
 
 	@Test

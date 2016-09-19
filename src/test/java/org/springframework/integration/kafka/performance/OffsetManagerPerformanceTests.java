@@ -22,6 +22,7 @@ import static org.springframework.integration.kafka.util.TopicUtils.ensureTopicC
 import java.util.Properties;
 
 import org.I0Itec.zkclient.ZkClient;
+import org.I0Itec.zkclient.ZkConnection;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -46,6 +47,8 @@ import com.gs.collections.api.multimap.MutableMultimap;
 import com.gs.collections.api.tuple.Pair;
 import com.gs.collections.impl.factory.Multimaps;
 import com.gs.collections.impl.tuple.Tuples;
+
+import kafka.utils.ZkUtils;
 import scala.collection.JavaConversions;
 import scala.collection.Map;
 import scala.collection.immutable.List$;
@@ -58,97 +61,97 @@ import scala.collection.immutable.Seq;
  */
 public class OffsetManagerPerformanceTests {
 
-	public static final int UPDATE_COUNT = 100000;
+    public static final int UPDATE_COUNT = 100000;
 
-	@Rule
-	public KafkaEmbedded embedded = new KafkaEmbedded(1);
+    @Rule
+    public KafkaEmbedded embedded = new KafkaEmbedded(1);
 
-	private final StopWatch stopWatch = new StopWatch("OffsetManagers Performance");
+    private final StopWatch stopWatch = new StopWatch("OffsetManagers Performance");
 
-	@Test
-	public void testPerformance() throws Exception {
-		ZookeeperConnect zookeeperConnect = new ZookeeperConnect(embedded.getZookeeperConnectionString());
+    @Test
+    public void testPerformance() throws Exception {
+        ZookeeperConnect zookeeperConnect = new ZookeeperConnect(embedded.getZookeeperConnectionString());
 
-		KafkaTopicOffsetManager kafkaTopicOffsetManager =
-				new KafkaTopicOffsetManager(zookeeperConnect, "zkTopic");
+        KafkaTopicOffsetManager kafkaTopicOffsetManager = new KafkaTopicOffsetManager(zookeeperConnect, "zkTopic");
 
-		KafkaNativeOffsetManager kafkaNativeOffsetManager = new KafkaNativeOffsetManager(
-				new DefaultConnectionFactory(new ZookeeperConfiguration(zookeeperConnect)), zookeeperConnect);
+        KafkaNativeOffsetManager kafkaNativeOffsetManager =
+                new KafkaNativeOffsetManager(new DefaultConnectionFactory(new ZookeeperConfiguration(zookeeperConnect)),
+                        zookeeperConnect);
 
-		KafkaTopicOffsetManager topicOffsetManagerForAssertion =
-				new KafkaTopicOffsetManager(zookeeperConnect, "zkTopic");
+        KafkaTopicOffsetManager topicOffsetManagerForAssertion =
+                new KafkaTopicOffsetManager(zookeeperConnect, "zkTopic");
 
-		KafkaNativeOffsetManager nativeOffsetManagerForAssertion = new KafkaNativeOffsetManager(
-				new DefaultConnectionFactory(new ZookeeperConfiguration(zookeeperConnect)), zookeeperConnect);
+        KafkaNativeOffsetManager nativeOffsetManagerForAssertion =
+                new KafkaNativeOffsetManager(new DefaultConnectionFactory(new ZookeeperConfiguration(zookeeperConnect)),
+                        zookeeperConnect);
 
-		doTest("Just KafkaTopicOffsetManager", kafkaTopicOffsetManager, topicOffsetManagerForAssertion, false);
-		doTest("Just KafkaNativeOffsetManager", kafkaNativeOffsetManager, nativeOffsetManagerForAssertion, false);
-		doTest("Window KafkaTopicOffsetManager", kafkaTopicOffsetManager, topicOffsetManagerForAssertion, true);
-		doTest("Window KafkaNativeOffsetManager", kafkaNativeOffsetManager, nativeOffsetManagerForAssertion, true);
+        doTest("Just KafkaTopicOffsetManager", kafkaTopicOffsetManager, topicOffsetManagerForAssertion, false);
+        doTest("Just KafkaNativeOffsetManager", kafkaNativeOffsetManager, nativeOffsetManagerForAssertion, false);
+        doTest("Window KafkaTopicOffsetManager", kafkaTopicOffsetManager, topicOffsetManagerForAssertion, true);
+        doTest("Window KafkaNativeOffsetManager", kafkaNativeOffsetManager, nativeOffsetManagerForAssertion, true);
 
-		System.out.println(this.stopWatch.prettyPrint());
-	}
+        System.out.println(this.stopWatch.prettyPrint());
+    }
 
-	private void doTest(String description, OffsetManager offsetManager,
-	                    OffsetManager offsetManagerForAssertion, boolean window) throws Exception {
-		createTopic(this.embedded.getZkClient(), "sometopic", 1, 1, 1);
-		Partition partition = new Partition("sometopic", 0);
+    private void doTest(String description, OffsetManager offsetManager, OffsetManager offsetManagerForAssertion,
+            boolean window) throws Exception {
+        createTopic(this.embedded.getZkClient(), "sometopic", 1, 1, 1);
+        Partition partition = new Partition("sometopic", 0);
 
-		((InitializingBean) offsetManager).afterPropertiesSet();
+        ((InitializingBean) offsetManager).afterPropertiesSet();
 
-		offsetManager.updateOffset(partition, 0);
+        offsetManager.updateOffset(partition, 0);
 
-		if (window) {
-			WindowingOffsetManager windowingOffsetManager = new WindowingOffsetManager(offsetManager);
-			windowingOffsetManager.setCount(100);
-			windowingOffsetManager.afterPropertiesSet();
-			offsetManager = windowingOffsetManager;
-		}
+        if (window) {
+            WindowingOffsetManager windowingOffsetManager = new WindowingOffsetManager(offsetManager);
+            windowingOffsetManager.setCount(100);
+            windowingOffsetManager.afterPropertiesSet();
+            offsetManager = windowingOffsetManager;
+        }
 
-		this.stopWatch.start(description);
-		for (long i = 1; i < UPDATE_COUNT; i++) {
-			offsetManager.updateOffset(partition, i);
-		}
-		stopWatch.stop();
-		((DisposableBean) offsetManager).destroy();
+        this.stopWatch.start(description);
+        for (long i = 1; i < UPDATE_COUNT; i++) {
+            offsetManager.updateOffset(partition, i);
+        }
+        stopWatch.stop();
+        ((DisposableBean) offsetManager).destroy();
 
-		((InitializingBean) offsetManagerForAssertion).afterPropertiesSet();
-		Assert.assertThat(offsetManagerForAssertion.getOffset(partition), is(99999L));
-	}
+        ((InitializingBean) offsetManagerForAssertion).afterPropertiesSet();
+        Assert.assertThat(offsetManagerForAssertion.getOffset(partition), is(99999L));
+    }
 
-	@SuppressWarnings("unchecked")
-	public void createTopic(ZkClient zkClient, String topicName, int partitionCount, int brokers, int replication) {
-		MutableMultimap<Integer, Integer> partitionDistribution =
-				createPartitionDistribution(partitionCount, brokers, replication);
-		ensureTopicCreated(zkClient, topicName, partitionCount, new Properties(),
-				toKafkaPartitionMap(partitionDistribution));
-	}
+    @SuppressWarnings("unchecked")
+    public void createTopic(ZkClient zkClient, String topicName, int partitionCount, int brokers, int replication) {
+        MutableMultimap<Integer, Integer> partitionDistribution =
+                createPartitionDistribution(partitionCount, brokers, replication);
+        ensureTopicCreated(new ZkUtils(zkClient, new ZkConnection(this.embedded.getZookeeperConnectionString()), true),
+                topicName, partitionCount, new Properties(), toKafkaPartitionMap(partitionDistribution));
+    }
 
+    public MutableMultimap<Integer, Integer> createPartitionDistribution(int partitionCount, int brokers,
+            int replication) {
+        MutableMultimap<Integer, Integer> partitionDistribution = Multimaps.mutable.list.with();
+        for (int i = 0; i < partitionCount; i++) {
+            for (int j = 0; j < replication; j++) {
+                partitionDistribution.put(i, (i + j) % brokers);
+            }
+        }
+        return partitionDistribution;
+    }
 
-	public MutableMultimap<Integer, Integer> createPartitionDistribution(int partitionCount, int brokers,
-	                                                                     int replication) {
-		MutableMultimap<Integer, Integer> partitionDistribution = Multimaps.mutable.list.with();
-		for (int i = 0; i < partitionCount; i++) {
-			for (int j = 0; j < replication; j++) {
-				partitionDistribution.put(i, (i + j) % brokers);
-			}
-		}
-		return partitionDistribution;
-	}
+    @SuppressWarnings({ "rawtypes", "serial", "deprecation", "unchecked" })
+    private Map toKafkaPartitionMap(Multimap<Integer, Integer> partitions) {
+        java.util.Map<Object, Seq<Object>> m =
+                partitions.toMap().collect(new Function2<Integer, RichIterable<Integer>, Pair<Object, Seq<Object>>>() {
 
-	@SuppressWarnings({"rawtypes", "serial", "deprecation", "unchecked"})
-	private Map toKafkaPartitionMap(Multimap<Integer, Integer> partitions) {
-		java.util.Map<Object, Seq<Object>> m = partitions.toMap()
-				.collect(new Function2<Integer, RichIterable<Integer>, Pair<Object, Seq<Object>>>() {
+                    @Override
+                    public Pair<Object, Seq<Object>> value(Integer argument1, RichIterable<Integer> argument2) {
+                        return Tuples.pair((Object) argument1,
+                                List$.MODULE$.fromArray(argument2.toArray(new Object[0])).toSeq());
+                    }
 
-					@Override
-					public Pair<Object, Seq<Object>> value(Integer argument1, RichIterable<Integer> argument2) {
-						return Tuples.pair((Object) argument1,
-								List$.MODULE$.fromArray(argument2.toArray(new Object[0])).toSeq());
-					}
-
-				});
-		return Map$.MODULE$.apply(JavaConversions.asScalaMap(m).toSeq());
-	}
+                });
+        return Map$.MODULE$.apply(JavaConversions.asScalaMap(m).toSeq());
+    }
 
 }

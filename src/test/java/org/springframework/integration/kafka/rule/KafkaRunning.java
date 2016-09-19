@@ -65,6 +65,8 @@ public class KafkaRunning extends TestWatcher implements KafkaRule {
 
     private ZkClient zkClient;
 
+    private ZkUtils utils;
+
     /**
      * @return a new rule that assumes an existing running broker
      */
@@ -77,6 +79,11 @@ public class KafkaRunning extends TestWatcher implements KafkaRule {
     }
 
     @Override
+    public ZkUtils getZkUtils() {
+        return utils;
+    }
+
+    @Override
     public String getZookeeperConnectionString() {
         return ZOOKEEPER_CONNECT_STRING;
     }
@@ -84,7 +91,6 @@ public class KafkaRunning extends TestWatcher implements KafkaRule {
     @Override
     @SuppressWarnings("serial")
     public BrokerAddress[] getBrokerAddresses() {
-        ZkUtils utils = new ZkUtils(zkClient, new ZkConnection(getZookeeperConnectionString()), false);
         Seq<Broker> allBrokersInCluster = utils.getAllBrokersInCluster();
         return ListIterate
                 .collect(JavaConversions.asJavaList(allBrokersInCluster), new Function<Broker, BrokerAddress>() {
@@ -117,6 +123,7 @@ public class KafkaRunning extends TestWatcher implements KafkaRule {
     public Statement apply(Statement base, Description description) {
         try {
             this.zkClient = new ZkClient(ZOOKEEPER_CONNECT_STRING, 1000, 1000, ZKStringSerializer$.MODULE$);
+            this.utils = new ZkUtils(zkClient, new ZkConnection(ZOOKEEPER_CONNECT_STRING), true);
             if (getBrokerAddresses().length == 0) {
                 throw new IllegalStateException("No running Kafka brokers");
             }

@@ -91,8 +91,8 @@ public class OutboundTests {
 	@After
 	public void tearDown() {
 		try {
-			AdminUtils.deleteTopic(kafkaRule.getZkClient(), TOPIC);
-			AdminUtils.deleteTopic(kafkaRule.getZkClient(), TOPIC2);
+			AdminUtils.deleteTopic(kafkaRule.getZkUtils(), TOPIC);
+			AdminUtils.deleteTopic(kafkaRule.getZkUtils(), TOPIC2);
 		}
 		catch (Exception e) {
 		}

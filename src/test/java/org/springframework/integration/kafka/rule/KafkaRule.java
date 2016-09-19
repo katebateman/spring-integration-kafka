@@ -20,6 +20,8 @@ package org.springframework.integration.kafka.rule;
 import java.util.List;
 
 import kafka.server.KafkaServer;
+import kafka.utils.ZkUtils;
+
 import org.I0Itec.zkclient.ZkClient;
 import org.junit.rules.TestRule;
 
@@ -33,6 +35,8 @@ import org.springframework.integration.kafka.core.BrokerAddress;
 public interface KafkaRule extends TestRule {
 
 	ZkClient getZkClient();
+
+	ZkUtils getZkUtils();
 
 	String getZookeeperConnectionString();
 
